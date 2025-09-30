@@ -1,0 +1,43 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*
+
+# Editor settings
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Logs and cache
+*.log
+.cache/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS generated files
+Thumbs.db
+*.tmp
+
+# 06 carpeta de ejemplos
+examples/
