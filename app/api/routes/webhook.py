@@ -27,6 +27,12 @@ def handle_webhook(payload: WebhookPayload) -> WebhookResponse:
             payload=payload.model_dump(by_alias=True)
         )
         decision = _master_agent.handle(workflow_state)
+        logger.info(
+            "Agente Madre | intents=%s | filtros=%s | handoff=%s",
+            decision.output,
+            decision.metadata.get("filters") if decision.metadata else None,
+            decision.handoff,
+        )
         reply = decision.reply
     except Exception as exc:  # pragma: no cover - defensive failure path
         logger.exception("Error al invocar el modelo: %s", exc)

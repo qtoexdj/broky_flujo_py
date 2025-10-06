@@ -66,6 +66,17 @@ def build_inbound_workflow(settings: Settings):
 
         normalized = state.get("normalized", {}).copy()
         normalized["realtor"] = realtor
+        if realtor:
+            normalized["realtor_bot"] = {
+                "name": realtor.get("bot_name"),
+                "personality": realtor.get("bot_personality"),
+                "tone": realtor.get("bot_tone"),
+            }
+            if not normalized.get("id_vector_project") and normalized.get("realtor_id"):
+                slug = str(realtor.get("name") or "").replace(" ", "_")
+                safe_uuid = str(normalized["realtor_id"]).replace("-", "_")
+                if slug and safe_uuid:
+                    normalized["id_vector_project"] = f"vector_projects_{slug}_{safe_uuid}"
 
         return {
             "realtor": realtor,
@@ -96,13 +107,30 @@ def build_inbound_workflow(settings: Settings):
             "channel_id": channel_id,
             "chat_id": chat_id,
             "message": payload.get("message"),
-            "followup_configuration": payload.get("followup_configuration"),
+            "followup_configuration": payload.get("followup_configuration")
+            or metadata.get("followup_configuration")
+            or [],
             "notifications_brokers_configurations": payload.get(
                 "notifications_brokers_configurations"
-            ),
-            "id_vector_project": payload.get("id_vector_project"),
-            "realtor": payload.get("realtor"),
+            )
+            or metadata.get("notifications_brokers_configurations")
+            or {},
+            "id_vector_project": payload.get("id_vector_project")
+            or metadata.get("id_vector_project"),
+            "realtor": payload.get("realtor") or metadata.get("realtor"),
         }
+
+        # Si no llega un identificador de vector predefinido, replicamos la
+        # convención usada en el flujo original de n8n.
+        if not normalized.get("id_vector_project") and normalized.get("realtor_id"):
+            realtor_name = (payload.get("realtor") or metadata.get("realtor") or {}).get(
+                "name"
+            )
+            realtor_uuid = normalized["realtor_id"]
+            if realtor_name and realtor_uuid:
+                slug = str(realtor_name).replace(" ", "_")
+                safe_uuid = str(realtor_uuid).replace("-", "_")
+                normalized["id_vector_project"] = f"vector_projects_{slug}_{safe_uuid}"
 
         return {
             "normalized": normalized,
@@ -228,6 +256,34 @@ def build_inbound_workflow(settings: Settings):
             "logs": [" | ".join(log_parts)],
         }
 
+    def consolidate_official_data(state: InboundState) -> InboundState:
+        normalized = state.get("normalized", {})
+        realtor = normalized.get("realtor") or {}
+        data = {
+            "session_id": normalized.get("session_id"),
+            "realtor_id": normalized.get("realtor_id"),
+            "realtor": realtor,
+            "realtor_bot": normalized.get("realtor_bot"),
+            "prospect_id": normalized.get("prospect_id"),
+            "telephone": normalized.get("telephone"),
+            "name": normalized.get("name"),
+            "channel_id": normalized.get("channel_id"),
+            "chat_id": normalized.get("chat_id"),
+            "message": normalized.get("message"),
+            "followup_configuration": normalized.get("followup_configuration"),
+            "notifications_brokers_configurations": normalized.get(
+                "notifications_brokers_configurations"
+            ),
+            "id_vector_project": normalized.get("id_vector_project"),
+            "properties_interested": normalized.get("properties_interested", []),
+            "mentioned_properties": normalized.get("mentioned_properties", []),
+        }
+
+        return {
+            "official_data": data,
+            "logs": ["datos oficiales consolidados"],
+        }
+
     def apply_opt_out(state: InboundState) -> InboundState:
         normalized = state.get("normalized", {})
         message = normalized.get("message")
@@ -262,6 +318,7 @@ def build_inbound_workflow(settings: Settings):
     graph.add_node("create_prospect", create_prospect)
     graph.add_node("hydrate_prospect", hydrate_prospect)
     graph.add_node("load_properties", load_properties)
+    graph.add_node("consolidate_official", consolidate_official_data)
     graph.add_node("apply_opt_out", apply_opt_out)
     graph.add_node("apply_automation", apply_automation_flag)
 
@@ -281,7 +338,8 @@ def build_inbound_workflow(settings: Settings):
 
     graph.add_edge("create_prospect", "hydrate_prospect")
     graph.add_edge("hydrate_prospect", "load_properties")
-    graph.add_edge("load_properties", "apply_opt_out")
+    graph.add_edge("load_properties", "consolidate_official")
+    graph.add_edge("consolidate_official", "apply_opt_out")
     graph.add_edge("apply_opt_out", "apply_automation")
     graph.add_edge("apply_automation", END)
 

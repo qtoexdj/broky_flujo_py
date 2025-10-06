@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +12,10 @@ import httpx
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class VectorSearchServiceError(RuntimeError):
+    """Raised when the vector microservice cannot be reached successfully."""
 
 
 @dataclass
@@ -74,31 +79,63 @@ class VectorSearchClient:
             payload["threshold"],
         )
 
-        client: Optional[httpx.Client] = self._client
+        max_attempts = 2
+        last_exception: Optional[Exception] = None
+        data: Optional[Dict[str, Any]] = None
 
-        try:
-            if client is None:
-                client = httpx.Client(base_url=self._base_url, timeout=self._timeout)
-            response = client.post("/vectors/search", json=payload)
-            response.raise_for_status()
-        except httpx.TimeoutException:
-            logger.exception("Timeout consultando el microservicio vectorial")
-            return []
-        except httpx.HTTPStatusError as exc:
-            logger.exception(
-                "Respuesta HTTP %s desde el microservicio vectorial: %s",
-                exc.response.status_code,
-                exc.response.text,
-            )
-            return []
-        except Exception:  # pragma: no cover - defensive failure path
-            logger.exception("Error inesperado al invocar el microservicio vectorial")
-            return []
-        finally:
-            if self._client is None and client is not None:
-                client.close()
+        for attempt in range(max_attempts):
+            client: Optional[httpx.Client] = None
+            try:
+                client = self._client or httpx.Client(
+                    base_url=self._base_url,
+                    timeout=self._timeout,
+                )
+                response = client.post("/vectors/search", json=payload)
+                response.raise_for_status()
+                content = response.json()
+                if not isinstance(content, dict):
+                    raise VectorSearchServiceError(
+                        "Respuesta inválida del microservicio vectorial",
+                    )
+                data = content
+                break
+            except httpx.TimeoutException as exc:
+                last_exception = exc
+                logger.warning(
+                    "Timeout consultando el microservicio vectorial (intento %d/%d)",
+                    attempt + 1,
+                    max_attempts,
+                )
+            except httpx.HTTPStatusError as exc:
+                last_exception = exc
+                logger.warning(
+                    "HTTP %s desde el microservicio vectorial (intento %d/%d): %s",
+                    exc.response.status_code,
+                    attempt + 1,
+                    max_attempts,
+                    exc.response.text,
+                )
+            except Exception as exc:  # pragma: no cover - defensive failure path
+                last_exception = exc
+                logger.exception(
+                    "Error inesperado al invocar el microservicio vectorial | intento %d/%d",
+                    attempt + 1,
+                    max_attempts,
+                )
+            finally:
+                if self._client is None and client is not None:
+                    client.close()
 
-        data = response.json()
+            if attempt + 1 < max_attempts:
+                backoff_seconds = min(1.0, 0.4 * (2**attempt))
+                logger.info(
+                    "Reintentando consulta vectorial tras %.2fs", backoff_seconds
+                )
+                time.sleep(backoff_seconds)
+
+        if data is None:
+            raise VectorSearchServiceError("No se pudo consultar el microservicio vectorial") from last_exception
+
         raw_results = data.get("results") if isinstance(data, dict) else None
         if not isinstance(raw_results, list):
             logger.warning("Respuesta del microservicio sin 'results' válido: %s", data)
@@ -109,4 +146,8 @@ class VectorSearchClient:
         return results
 
 
-__all__ = ["VectorSearchClient", "VectorSearchResult"]
+__all__ = [
+    "VectorSearchClient",
+    "VectorSearchResult",
+    "VectorSearchServiceError",
+]

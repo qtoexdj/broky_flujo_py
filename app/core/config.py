@@ -39,7 +39,13 @@ class Settings(BaseModel):
     )
     vector_search_limit: int = Field(default=5, alias="VECTOR_SEARCH_LIMIT")
     vector_search_threshold: float = Field(default=0.6, alias="VECTOR_SEARCH_THRESHOLD")
-    vector_service_timeout: float = Field(default=30.0, alias="VECTOR_SERVICE_TIMEOUT")
+    vector_service_timeout: float = Field(default=1.2, alias="VECTOR_SERVICE_TIMEOUT")
+    rag_failure_reply: str = Field(
+        default=(
+            "Estamos consultando la información con un asesor. Te responderemos en breve."
+        ),
+        alias="RAG_FAILURE_REPLY",
+    )
 
     rag_system_prompt: str = Field(
         default=(
@@ -49,6 +55,14 @@ class Settings(BaseModel):
             "precios, ubicaciones, tipologías y estados cuando estén disponibles."
         ),
         alias="RAG_SYSTEM_PROMPT",
+    )
+    rag_prompt_path: str = Field(
+        default="docs/prompts/rag_subagent_prompt.md",
+        alias="RAG_PROMPT_PATH",
+    )
+
+    master_agent_prompt_path: str = Field(
+        default="docs/master_agent_prompt.md", alias="MASTER_AGENT_PROMPT_PATH"
     )
 
     @property

@@ -57,10 +57,13 @@ curl --request POST \
 
 ## Componentes principales
 
-- `app/api/routes/webhook.py`: expone `/webhook`, ejecuta el pipeline inbound y delega la respuesta en `MasterAgent`.
-- `app/workflows/inbound.py`: implementación del flujo descrito en `docs/flujo.md`.
-- `app/workflows/service.py`: cachea el grafo de LangGraph y ofrece un fallback limitado cuando Supabase no está disponible.
-- `app/agents/master.py`: agente maestro temporal que emitirá la respuesta mientras se implementan los agentes especializados.
+- `app/api/routes/webhook.py`: expone `/webhook`, ejecuta el pipeline inbound y delega la decisión al Agente Madre.
+- `app/workflows/inbound.py`: implementación del flujo descrito en `docs/flujo.md` para normalizar prospecto, sesión y flags de automatización.
+- `app/workflows/service.py`: cachea el grafo de LangGraph y ofrece un fallback reducido cuando Supabase no está disponible.
+- `app/agents/master.py`: orquestador que lee la memoria en Supabase (`chats_history_n8n`), clasifica intenciones y devuelve salidas estructuradas para los filtros.
+- `app/services/chat_history_repository.py`: wrapper simple para leer/escribir el historial de conversación en Supabase.
+- `docs/master_agent_prompt.md`: prompt editable del Agente Madre (puedes personalizar tono e instrucciones sin tocar el código).
+- `docs/chats_history_n8n_table.md`: referencia de la tabla de memoria usada por el orquestador.
 
 ## Zona experimental
 
@@ -69,6 +72,6 @@ El código de ejemplo para el chatbot conversacional y el stack RAG se movió a 
 ## Próximos pasos sugeridos
 
 - Conectar el webhook real de WhatsApp (Meta Cloud API) y adaptar el payload.
-- Implementar el agente maestro definitivo usando las instrucciones definidas en `docs/`.
-- Añadir pruebas automatizadas para el flujo inbound y los repositorios de Supabase.
-- Incorporar almacenamiento persistente de historiales si se reactiva el chatbot conversacional.
+- Sustituir la lógica heurística de intenciones por prompts/LLM siguiendo las instrucciones de `docs/`.
+- Añadir pruebas automatizadas para el flujo inbound, el repositorio de historial y la clasificación de intenciones.
+- Activar y conectar los subagentes (RAG, calificación, actualización de proyectos, agenda) detrás de los filtros.

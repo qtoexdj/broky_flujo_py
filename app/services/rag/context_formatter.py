@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable, List
 
-from app.experimental.rag.vector_client import VectorSearchResult
+from app.services.rag.vector_client import VectorSearchResult
 
 
 def format_rag_context(results: Iterable[VectorSearchResult]) -> str:

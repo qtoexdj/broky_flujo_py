@@ -8,10 +8,10 @@ Describe el pipeline basado en LangGraph que prepara cada webhook antes de llega
    Valida que exista `payload`, registra el evento y arranca con `automation_allowed = True`, `handoff_required = False`.
 
 2. **Normalización (`normalize`)**  
-   Extrae el sobre mínimo: `realtor_id`, `telephone`, `session_id`, `name`, `channel_id`, `chat_id`, `message`, `followup_configuration`, `notifications_brokers_configurations`, `id_vector_project`.
+   Extrae el sobre completo: `realtor_id`, `telephone`, `session_id`, `name`, `channel_id`, `chat_id`, `message`, `followup_configuration`, `notifications_brokers_configurations`, `id_vector_project`. Si falta `id_vector_project`, se genera con la convención `vector_projects_<nombre>_<uuid>`.
 
 3. **Lookup de inmobiliaria (`realtor`)**  
-   Consulta `realtors` por `channel_id`, agrega la ficha completa (nombre, descripción, configuraciones, etc.) al estado.
+   Consulta `realtors` por `channel_id`, agrega la ficha completa (nombre, descripción, configuraciones, etc.) al estado junto con la configuración del bot (`bot_name`, `bot_personality`, `bot_tone`).
 
 4. **Lookup de prospecto (`lookup_prospect`)**  
    Busca en `prospects` por `(realtor_id, telephone)`. Marca `prospect_exists` y guarda el registro si lo encuentra.
@@ -26,6 +26,9 @@ Describe el pipeline basado en LangGraph que prepara cada webhook antes de llega
    - Lee `prospect_project_interests` para obtener `project_id` vinculados.  
    - Recupera los detalles en la tabla `projects` y los deja en `properties_interested`.  
    - Combina con `mentioned_properties` almacenadas en `prospects` para conservar todo el contexto.
+
+7.1. **Consolidación de datos oficiales (`consolidate_official`)**  
+   Crea un objeto `official_data` con todos los valores relevantes (`session_id`, `realtor_id`, configuraciones del realtor, followups, proyectos/intereses, etc.) para consumo del Agente Madre y subagentes.
 
 8. **Filtro opt-out (`apply_opt_out`)**  
    Si el mensaje recibido es exactamente `"0"`, desactiva automatización (`automation_allowed = False`), marca `handoff_required = True` y setea `handoff_reason = 'opt_out'`.
