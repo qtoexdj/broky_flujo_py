@@ -2,6 +2,8 @@
 
 Describe el pipeline basado en LangGraph que prepara cada webhook antes de llegar al motor conversacional. Implementación en `app/workflows/inbound.py`.
 
+> **Migración en curso**: el preprocesamiento permanece en LangGraph, pero las decisiones del Agente Madre y subagentes pasarán a `broky/agents` (LangChain). El estado compartido se modela con `BrokyContext`.
+
 ## Pasos del flujo
 
 1. **Recepción (`init`)**  

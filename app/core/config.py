@@ -38,7 +38,7 @@ class Settings(BaseModel):
         default=None, alias="VECTOR_SERVICE_URL"
     )
     vector_search_limit: int = Field(default=5, alias="VECTOR_SEARCH_LIMIT")
-    vector_search_threshold: float = Field(default=0.6, alias="VECTOR_SEARCH_THRESHOLD")
+    vector_search_threshold: float = Field(default=0.7, alias="VECTOR_SEARCH_THRESHOLD")
     vector_service_timeout: float = Field(default=1.2, alias="VECTOR_SERVICE_TIMEOUT")
     rag_failure_reply: str = Field(
         default=(

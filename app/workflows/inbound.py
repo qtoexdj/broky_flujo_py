@@ -218,6 +218,7 @@ def build_inbound_workflow(settings: Settings):
         normalized["prospect_id"] = prospect.get("id")
         normalized["automatization"] = prospect.get("automatization", True)
         normalized["mentioned_properties"] = prospect.get("mentioned_properties", [])
+        normalized["stage"] = prospect.get("stage")
 
         return {
             "normalized": normalized,
@@ -277,6 +278,7 @@ def build_inbound_workflow(settings: Settings):
             "id_vector_project": normalized.get("id_vector_project"),
             "properties_interested": normalized.get("properties_interested", []),
             "mentioned_properties": normalized.get("mentioned_properties", []),
+            "stage": normalized.get("stage"),
         }
 
         return {

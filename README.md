@@ -6,7 +6,7 @@ Servicio FastAPI que recibe webhooks de WhatsApp, ejecuta el flujo descrito en `
 
 - Python 3.13 (usa el `.venv` ya creado)
 - Credenciales de Supabase (`SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`, o `SUPABASE_ANON_KEY`)
-- Variables opcionales de OpenAI (`OPENAI_API_KEY`, etc.) solo si activas los prototipos de `app/experimental`
+- Variables opcionales de OpenAI (`OPENAI_API_KEY`, etc.) para habilitar el Agente Madre y el subagente RAG
 
 ## Configuración inicial
 
@@ -60,18 +60,25 @@ curl --request POST \
 - `app/api/routes/webhook.py`: expone `/webhook`, ejecuta el pipeline inbound y delega la decisión al Agente Madre.
 - `app/workflows/inbound.py`: implementación del flujo descrito en `docs/flujo.md` para normalizar prospecto, sesión y flags de automatización.
 - `app/workflows/service.py`: cachea el grafo de LangGraph y ofrece un fallback reducido cuando Supabase no está disponible.
-- `app/agents/master.py`: orquestador que lee la memoria en Supabase (`chats_history_n8n`), clasifica intenciones y devuelve salidas estructuradas para los filtros.
+- `broky/runtime/master.py`: runtime que lee la memoria en Supabase (`chats_history_n8n`), clasifica intenciones con LangChain y coordina los subagentes.
 - `app/services/chat_history_repository.py`: wrapper simple para leer/escribir el historial de conversación en Supabase.
 - `docs/master_agent_prompt.md`: prompt editable del Agente Madre (puedes personalizar tono e instrucciones sin tocar el código).
 - `docs/chats_history_n8n_table.md`: referencia de la tabla de memoria usada por el orquestador.
+- `broky/`: nueva capa híbrida (LangChain) con agentes, herramientas, memoria y runtimes que conectan con LangGraph (incluye subagentes de RAG, proyectos, calificación, agenda y envío de archivos).
 
-## Zona experimental
+El runtime de LangChain está activo por defecto; no se necesita ninguna bandera adicional para habilitarlo.
 
-El código de ejemplo para el chatbot conversacional y el stack RAG se movió a `app/experimental/`. No se monta en la API por defecto; sirve únicamente como referencia tecnológica.
+## Pruebas automatizadas
+
+```bash
+source .venv/bin/activate
+pytest
+```
+
+La suite incluye `tests/test_webhook_quilmes.py`, que stubbea el pipeline para el realtor `de21b61b-d9b5-437a-9785-5252e680b03c` y valida que el bot responda a consultas sobre propiedades en Quilmes. Usa esto como plantilla para agregar escenarios reales con Supabase y el microservicio vectorial activos.
 
 ## Próximos pasos sugeridos
 
 - Conectar el webhook real de WhatsApp (Meta Cloud API) y adaptar el payload.
-- Sustituir la lógica heurística de intenciones por prompts/LLM siguiendo las instrucciones de `docs/`.
-- Añadir pruebas automatizadas para el flujo inbound, el repositorio de historial y la clasificación de intenciones.
-- Activar y conectar los subagentes (RAG, calificación, actualización de proyectos, agenda) detrás de los filtros.
+- Ejecutar pruebas end-to-end con Supabase y el servicio vectorial para validar subagentes (calificación, agenda, archivos, follow-ups).
+- Extender la suite de `pytest` con mocks/fixtures que cubran rutas negativas y métricas de observabilidad.

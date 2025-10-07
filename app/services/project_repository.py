@@ -58,3 +58,25 @@ class ProjectRepository:
             return projects
 
         return []
+
+    def list_by_realtor(self, realtor_id: str) -> List[Dict[str, Any]]:
+        """Return all projects belonging to a realtor."""
+
+        try:
+            response = (
+                self._client.table("projects")
+                .select("id, name_property, name")
+                .eq("realtor_id", realtor_id)
+                .execute()
+            )
+        except Exception:  # pragma: no cover - log and continue
+            logger.exception(
+                "No se pudieron recuperar proyectos para realtor_id=%s",
+                realtor_id,
+            )
+            return []
+
+        data = getattr(response, "data", None)
+        if isinstance(data, list):
+            return data
+        return []

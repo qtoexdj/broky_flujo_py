@@ -3,10 +3,10 @@ import logging
 from fastapi import APIRouter, HTTPException
 from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
 
-from app.agents.master import MasterAgent
 from app.core.config import get_settings
 from app.models.webhook import WebhookPayload, WebhookResponse
 from app.workflows.service import InboundWorkflowService
+from broky.runtime import MasterAgentRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 _settings = get_settings()
 _workflow_service = InboundWorkflowService(_settings)
-_master_agent = MasterAgent(_settings)
+_master_runtime = MasterAgentRuntime(_settings)
 
 
 @router.post("", response_model=WebhookResponse)
@@ -26,14 +26,15 @@ def handle_webhook(payload: WebhookPayload) -> WebhookResponse:
         workflow_state = _workflow_service.run(
             payload=payload.model_dump(by_alias=True)
         )
-        decision = _master_agent.handle(workflow_state)
+
+        result = _master_runtime.run(workflow_state)
         logger.info(
-            "Agente Madre | intents=%s | filtros=%s | handoff=%s",
-            decision.output,
-            decision.metadata.get("filters") if decision.metadata else None,
-            decision.handoff,
+            "MasterAgentRuntime | intents=%s | filtros=%s | handoff=%s",
+            result.intents,
+            result.filters,
+            result.handoff,
         )
-        reply = decision.reply
+        reply = result.reply
     except Exception as exc:  # pragma: no cover - defensive failure path
         logger.exception("Error al invocar el modelo: %s", exc)
         raise HTTPException(

@@ -18,18 +18,43 @@ El **Agente Madre** clasifica intenciones a partir del mensaje normalizado que e
 
 Las cuatro primeras compuertas técnicas (`filter_rag`, `filter_intention`, `filter_calification`, `filter_schedule`) se complementan con filtros utilitarios (`filter_files`, `filter_desinteres`, controles de follow-up y hand-off). Toda la conversación se persiste en Supabase (`chats_history_n8n`) y se limpia selectivamente mediante el "Chat Memory Manager" nativo del flujo de n8n.
 
+> **Nota LangChain**: los subagentes se reescribirán como `AgentExecutor` dentro de `broky/agents/` y sus dependencias (Supabase, RAG, HTTP) se expondrán como `broky.tools.*`. LangGraph seguirá activando cada filter, delegando la ejecución real a la nueva capa.
+
+Herramientas ya disponibles en `broky.tools`:
+- `broky.tools.realtor_lookup`
+- `broky.tools.prospect_lookup`
+- `broky.tools.prospect_create`
+- `broky.tools.properties_by_prospect`
+- `broky.tools.rag_search`
+- `broky.tools.project_interest_link`
+- `broky.tools.calification_update`
+- `broky.tools.schedule_visit`
+
+La ejecución desde LangGraph se gestionará con `MasterAgentRuntime` (`broky/runtime/master.py`), el cual hidrata el contexto, invoca al agente y persiste memoria en Supabase.
+
+Prompts activos:
+- `docs/master_agent_prompt.md`
+- `docs/prompts/rag_subagent_prompt.md`
+- `docs/prompts/calification_subagent_prompt.md`
+- `docs/prompts/schedule_subagent_prompt.md`
+
 ## Estado de implementación
 
-- **`filter_rag`** — ✅ Completado: subagente integrado en FastAPI; consume el microservicio vectorial con timeout/retry, genera respuesta estructurada y persiste `sources`/`mentioned_properties` y `usage` en `chats_history_n8n`.
-- **`filter_intention`** — ✅ Completado: `ProjectInterestSubAgent` + `ProjectInterestService` enlazan proyectos mencionados en Supabase (`prospect_project_interests`), aplican idempotencia y registran la respuesta en `chats_history_n8n`.
-- **`filter_calification`** — Pendiente: requiere `ProspectQualificationAgent`, normalización de variables y actualización de Supabase.
-- **`filter_schedule`** — Pendiente: necesita `SchedulingAgent`, validaciones de stage `qualified` y almacenamiento de visitas.
-- **`filter_files` y procesos utilitarios** (`followup_prospect`, `followup_broker`, `filter_desinteres`, hand-off humano) — Pendientes: definir servicios, llaves de idempotencia y trazabilidad.
+- **`filter_rag`** — ✅ Completado: subagente integrado en FastAPI; consume el microservicio vectorial con timeout/retry, genera respuesta estructurada y persiste `sources`/`mentioned_properties` y `usage` en `chats_history_n8n`. **Migración LangChain**: `RAGAgentExecutor` (`broky/agents/rag.py`) ejecuta el flujo mediante `broky.tools.rag_search` dentro del runtime activo por defecto.
+- **`filter_intention`** — ✅ Completado: `ProjectInterestSubAgent` + `ProjectInterestService` enlazan proyectos mencionados en Supabase (`prospect_project_interests`), aplican idempotencia y registran la respuesta en `chats_history_n8n`. **Migración LangChain**: `ProjectInterestAgentExecutor` (`broky/agents/project_interest.py`) usa la herramienta `broky.tools.project_interest_link` para el runtime híbrido.
+- **`filter_calification`** — ✅ Implementado en LangChain (`CalificationAgentExecutor` + `broky.tools.calification_update`). Falta validar con Supabase real, normalizar métricas y cubrir casos negativos (datos incompletos, stage bloqueada).
+- **`filter_schedule`** — ✅ Implementado en LangChain (`ScheduleAgentExecutor` + `broky.tools.schedule_visit`). Requiere pruebas end-to-end con Supabase y servicio de agenda, además de reglas de feriados/notificaciones.
+- **`filter_files`** — ✅ Implementado en LangChain (`FilesAgentExecutor`, `broky.tools.projects_list`, `broky.tools.project_files`). Pendiente validar múltiples proyectos, performance y métricas de entrega.
+- **Procesos utilitarios**
+  - `followup_prospect` y `followup_broker` — ✅ Lógica portada en `broky/processes/followups.py`. Falta instrumentación, idempotencia extendida y pruebas de regresión integradas.
+  - `filter_desinteres` y hand-off humano — ✅ Implementado en `broky/processes/handoff.py`. Pendiente integrar notificaciones externas y métricas de opt-out.
+
+> Las secciones siguientes describen el diseño funcional original y sirven como checklist de validación. Contrasta cada punto con la implementación actual (`broky/agents`, `broky/tools`, `broky/processes`) y registra los casos cubiertos en pruebas automatizadas.
 
 ## 0. Estado actual confirmado
 
 - El Agente Madre usa un LLM (Claude/OpenAI) para detectar intenciones y generar el array de salida; **no ejecuta lógica de negocio**.
-- Las compuertas (`filter_*`) ya están calculadas y conectadas en FastAPI, pero los subagentes aún no ejecutan acciones reales.
+- Las compuertas (`filter_*`) ya están calculadas y conectadas en FastAPI. `MasterAgentRuntime` invoca secuencialmente todos los subagentes LangChain (RAG, proyectos, calificación, agenda, archivos) y procesos utilitarios; falta validar su comportamiento con datos reales y tolerancia a errores.
 - `chats_history_n8n` está disponible para registrar todo intercambio (Agente Madre y subagentes). No se maneja TTL global, solo borrado puntual de registros conflictivos.
 - El microservicio de vectores (`POST /vectors/search`) corre en Docker, listo para consumo externo; no es necesario generar embeddings desde FastAPI.
 

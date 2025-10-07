@@ -88,3 +88,95 @@ class ProspectRepository:
 
         data = getattr(response, "data", None) or []
         return data[0] if data else None
+
+    def update_calification(
+        self,
+        prospect_id: str,
+        *,
+        calification: Dict[str, Any],
+        stage: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        payload: Dict[str, Any] = {
+            "calification_variables": calification,
+        }
+        if stage:
+            payload["stage"] = stage
+
+        try:
+            response = (
+                self._client.table(self._table)
+                .update(payload)
+                .eq("id", prospect_id)
+                .execute()
+            )
+        except Exception:  # pragma: no cover - log y propagar
+            logger.exception(
+                "Error actualizando calificación del prospecto %s",
+                prospect_id,
+            )
+            raise
+
+        data = getattr(response, "data", None) or []
+        return data[0] if data else None
+
+    def get_calification(self, prospect_id: str) -> Dict[str, Any]:
+        try:
+            response = (
+                self._client.table(self._table)
+                .select("calification_variables, stage")
+                .eq("id", prospect_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception:  # pragma: no cover - log y continuar
+            logger.exception(
+                "Error leyendo calificación del prospecto %s",
+                prospect_id,
+            )
+            return {}
+
+        rows = getattr(response, "data", None) or []
+        if not rows:
+            return {}
+        record = rows[0]
+        variables = record.get("calification_variables") or {}
+        if not isinstance(variables, dict):
+            variables = {}
+        stage = record.get("stage")
+        return {
+            "calification_variables": variables,
+            "stage": stage,
+        }
+
+    def update_schedule(
+        self,
+        prospect_id: str,
+        *,
+        scheduled_at: Optional[str],
+        stage: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        payload: Dict[str, Any] = {}
+        if scheduled_at is not None:
+            payload["scheduled_at"] = scheduled_at
+        if stage:
+            payload["stage"] = stage
+
+        if not payload:
+            return None
+
+        try:
+            response = (
+                self._client.table(self._table)
+                .update(payload)
+                .eq("id", prospect_id)
+                .execute()
+            )
+        except Exception:  # pragma: no cover - log y propagar
+            logger.exception(
+                "Error actualizando agenda del prospecto %s",
+                prospect_id,
+            )
+            raise
+
+        data = getattr(response, "data", None) or []
+        return data[0] if data else None
