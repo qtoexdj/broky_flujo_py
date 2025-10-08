@@ -1,4 +1,4 @@
-"""LangChain executor for the Master Agent."""
+"""LangChain executor that clasifica intenciones del mensaje actual."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class MasterAgentExecutor(BrokyAgent):
-    """Ejecutor principal que migra el Agente Madre a LangChain."""
+    """Ejecutor responsable de clasificar intenciones y banderas de flujo."""
 
     def __init__(self) -> None:
         self._settings = get_langchain_settings()
@@ -30,7 +30,7 @@ class MasterAgentExecutor(BrokyAgent):
                 api_key=self._settings.openai_api_key,
                 model=self._settings.openai_model,
                 temperature=0.2,
-                response_format={"type": "json_object"},
+                model_kwargs={"response_format": {"type": "json_object"}}
             )
         else:
             logger.warning(
@@ -58,14 +58,14 @@ class MasterAgentExecutor(BrokyAgent):
 
     def handle_output(self, context: BrokyContext, result: Dict[str, Any]) -> BrokyContext:
         filters = result.get("filters") or {}
-        reply = result.get("reply") or self._fallback_reply(filters)
         intents = result.get("intents") or []
 
         context.metadata.setdefault("master_agent", result)
-        context.metadata["reply"] = reply
         context.metadata["intents"] = intents
         context.metadata["filters"] = filters
         context.metadata.setdefault("subagent_replies", [])
+        if result.get("handoff"):
+            context.metadata["handoff_required"] = True
 
         context.append_log(
             f"MasterAgent intents={intents} filters={filters} handoff={result.get('handoff')}"
@@ -107,14 +107,15 @@ class MasterAgentExecutor(BrokyAgent):
             logger.exception("No se pudo parsear la salida JSON del Agente Madre")
             return self._heuristic_output(message)
 
-        intents = self._augment_intents(self._coerce_intents(data), message)
+        intents = self._augment_intents(
+            self._normalize_intents(self._coerce_intents(data)), message
+        )
         data["intents"] = intents
 
         if "filters" not in data:
             data["filters"] = self._build_filters(intents)
 
         data.setdefault("handoff", False)
-        data.setdefault("reply", self._fallback_reply(data["filters"]))
         return data
 
     def _build_messages(
@@ -198,36 +199,6 @@ class MasterAgentExecutor(BrokyAgent):
             return alt.strip()
         return None
 
-    def _fallback_reply(self, filters: Dict[str, Any]) -> str:
-        fragments: List[str] = []
-        if filters.get("filter_rag"):
-            fragments.append(
-                "Revisaré la información disponible para responder con detalles claros."
-            )
-        if filters.get("filter_intention"):
-            fragments.append(
-                "Registraré tu interés en el proyecto para mantenerlo actualizado."
-            )
-        if filters.get("filter_calification"):
-            fragments.append(
-                "Consideraré tu información para la calificación del prospecto."
-            )
-        if filters.get("filter_schedule"):
-            fragments.append("Coordinaré opciones para agendar una visita.")
-        if filters.get("filter_files"):
-            fragments.append("Prepararé los archivos solicitados para que puedas revisarlos.")
-        if filters.get("filter_contact"):
-            fragments.append("Un asesor humano se pondrá en contacto contigo.")
-        if filters.get("filter_desinteres"):
-            fragments.append("Detendré los mensajes automáticos y quedo atento si necesitas algo más.")
-
-        if not fragments:
-            return (
-                "Hemos recibido tu mensaje y lo estamos procesando. "
-                "En breve continuaré con los siguientes pasos."
-            )
-        return " ".join(fragments)
-
     def _build_filters(self, intents: List[str]) -> Dict[str, Any]:
         intent_set = set(intents)
         filters = {
@@ -237,17 +208,20 @@ class MasterAgentExecutor(BrokyAgent):
             "filter_intention": "anotar_proyecto" in intent_set,
             "filter_calification": bool({"forma_pago", "fecha_compra"} & intent_set),
             "filter_schedule": "fecha_visita" in intent_set,
-            "filter_files": "enviar_archivos" in intent_set,
+            "filter_files": bool(
+                {"enviar_archivos", "pide_fotos_plano_videos"} & intent_set
+            ),
             "filter_contact": "contacto_humano" in intent_set,
             "filter_desinteres": "desinteres" in intent_set,
         }
         return filters
 
     def _heuristic_output(self, message: str) -> Dict[str, Any]:
-        intents = self._augment_intents(self._heuristic_intents(message), message)
+        intents = self._augment_intents(
+            self._normalize_intents(self._heuristic_intents(message)), message
+        )
         filters = self._build_filters(intents)
         return {
-            "reply": self._fallback_reply(filters),
             "intents": intents,
             "filters": filters,
             "handoff": False,
@@ -308,11 +282,29 @@ class MasterAgentExecutor(BrokyAgent):
                 intents.append("desinteres")
         return intents
 
+    @staticmethod
+    def _normalize_intents(intents: List[str]) -> List[str]:
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for intent in intents:
+            if not isinstance(intent, str):
+                continue
+            trimmed = intent.strip().lower()
+            if not trimmed:
+                continue
+            aliases = [trimmed]
+            if trimmed == "pide_fotos_plano_videos":
+                aliases.append("enviar_archivos")
+            for alias in aliases:
+                if alias not in seen:
+                    normalized.append(alias)
+                    seen.add(alias)
+        return normalized
+
     def _build_failure_output(self, reason: str) -> Dict[str, Any]:
         logger.warning("MasterAgentExecutor sin mensaje válido | reason=%s", reason)
         filters = {}
         return {
-            "reply": self._fallback_reply(filters),
             "intents": [],
             "filters": filters,
             "handoff": True,
@@ -320,28 +312,30 @@ class MasterAgentExecutor(BrokyAgent):
         }
 
     def _load_prompt(self) -> str:
-        path = Path("docs/master_agent_prompt.md")
-        if not path.is_absolute():
-            path = Path(__file__).resolve().parents[2] / "docs" / "master_agent_prompt.md"
-        try:
-            text = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            logger.warning(
-                "Prompt del Agente Madre no encontrado en %s; usando fallback", path
-            )
-            return (
-                "Eres un asistente cordial que responde consultas inmobiliarias "
-                "en base al contexto disponible y clasifica intenciones en formato JSON"
-            )
-        except Exception:
-            logger.exception("Error leyendo el prompt del Agente Madre")
-            return (
-                "Eres un asistente cordial que responde consultas inmobiliarias "
-                "en base al contexto disponible y clasifica intenciones en formato JSON"
-            )
+        path_candidates = [
+            Path("docs/new_prompts/Agente_madre.md"),
+            Path("docs/master_agent_prompt.md"),
+        ]
+        base_path = Path(__file__).resolve().parents[2]
+        for candidate in path_candidates:
+            path = candidate
+            if not path.is_absolute():
+                path = base_path / path
+            try:
+                text = path.read_text(encoding="utf-8")
+                stripped = text.strip()
+                if stripped:
+                    return stripped
+            except FileNotFoundError:
+                continue
+            except Exception:
+                logger.exception("Error leyendo el prompt del Agente Madre en %s", path)
+                continue
 
-        stripped = text.strip()
-        return stripped or (
+        logger.warning(
+            "No se encontró prompt del Agente Madre; usando fallback genérico"
+        )
+        return (
             "Eres un asistente cordial que responde consultas inmobiliarias "
             "en base al contexto disponible y clasifica intenciones en formato JSON"
         )

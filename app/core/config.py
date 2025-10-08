@@ -65,6 +65,12 @@ class Settings(BaseModel):
         default="docs/master_agent_prompt.md", alias="MASTER_AGENT_PROMPT_PATH"
     )
 
+    whapi_base_url: Optional[AnyHttpUrl] = Field(
+        default="https://gate.whapi.cloud",
+        alias="WHAPI_BASE_URL",
+    )
+    whapi_timeout: float = Field(default=5.0, alias="WHAPI_TIMEOUT")
+
     @property
     def supabase_api_key(self) -> Optional[str]:
         return self.supabase_service_role_key or self.supabase_anon_key

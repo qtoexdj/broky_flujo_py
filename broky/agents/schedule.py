@@ -33,7 +33,7 @@ class ScheduleAgentExecutor(BrokyAgent):
                 api_key=self._settings.openai_api_key,
                 model=self._settings.openai_model,
                 temperature=0,
-                response_format={"type": "json_object"},
+                model_kwargs={"response_format": {"type": "json_object"}}
             )
         else:
             logger.warning(

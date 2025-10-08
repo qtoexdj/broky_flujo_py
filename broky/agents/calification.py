@@ -33,7 +33,7 @@ class CalificationAgentExecutor(BrokyAgent):
                 api_key=self._settings.openai_api_key,
                 model=self._settings.openai_model,
                 temperature=0,
-                response_format={"type": "json_object"},
+                model_kwargs={"response_format": {"type": "json_object"}}
             )
         else:
             logger.warning(
@@ -226,7 +226,7 @@ class CalificationAgentExecutor(BrokyAgent):
         return {
             "reply": reply,
             "calification": calification,
-            "stage": self._auto_stage(calification),
+            "stage": CalificationAgentExecutor._auto_stage(calification),
             "status": "heuristic",
         }
 

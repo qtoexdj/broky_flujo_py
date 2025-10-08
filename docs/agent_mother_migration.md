@@ -8,6 +8,7 @@
   - Persiste mensaje/respuesta en Supabase mediante `ChatHistoryRepository` y adjunta metadata de subagentes.
 - **Memoria**: `chat_history_repository.py` encapsula lectura/escritura en la tabla documentada en `docs/chats_history_n8n_table.md`.
 - **Subagentes**: RAG, interés de proyectos, calificación, agenda, archivos, follow-ups y handoff se ejecutan desde LangChain (ver `broky/agents/` y `broky/processes/`). Falta validación end-to-end con Supabase/productivo.
+- **Procesos posteriores al handoff**: `broky/processes/assignment.py` asigna brokers disponibles, `broky/processes/notifications.py` genera payloads estructurados y `app/services/whapi_client.py` entrega la respuesta final/notificaciones vía Whapi usando el `token_whapi` del realtor.
 
 ## Objetivo de migración
 Replicar el flujo agentic de n8n (`examples/payloads/Agentic-Pdch.json`) dentro del servicio FastAPI, manteniendo:
@@ -35,12 +36,12 @@ Replicar el flujo agentic de n8n (`examples/payloads/Agentic-Pdch.json`) dentro 
 - Se probaron payloads de Quilmes (`realtor_id=de21b61b-d9b5-437a-9785-5252e680b03c`) y Parcelas Chile (`realtor_id=05e67a9f-4d46-4dfc-bc2f-51178c21d5e4`) observando respuestas contextualizadas y persistencia de `sources`, `usage`, `status` y `mentioned_properties` en `chats_history_n8n`.
 - `filter_intention` vincula proyectos mencionados en la sesión (`ProjectInterestAgentExecutor` + Supabase) y guarda la salida en memoria (`subagents.filter_intention`).
 - `tests/test_webhook_quilmes.py` stubbea Supabase/LLM para el realtor de Quilmes y verifica que el endpoint responda correctamente. Útil como plantilla para futuras pruebas E2E.
+- `broky/processes/assignment.py` asigna automáticamente un broker activo cuando se produce un hand-off (excluyendo opt-out) y deja la decisión en `metadata.assignments.broker`.
+- `broky/processes/notifications.py` consolida los avisos generados (contacto humano, opt-out) en `metadata.notifications` para que una capa externa los envíe.
 
 ## Próximos pasos (orden sugerido)
-1. **Cerrar normalización/datos oficiales**
-   - Mapear todos los campos generados por el nodo `variables_primeras` en `normalized`.
-   - Incorporar atributos del realtor relevantes para el prompt (nombre del bot, tono, personalidad).
-   - Adjuntar proyectos/intereses y `mentioned_properties` en el objeto consolidado.
+1. **Cerrar normalización/datos oficiales** ✅
+   - Se mapearon campos adicionales (vendor_id, observaciones, calificación, configuraciones del realtor) en `official_data`. Falta validar contra payloads reales para asegurar paridad total con `datos_oficiales` de n8n.
 
 2. **Actualizar Agente Madre a LLM real** ✅
    - Prompt cargado desde `docs/master_agent_prompt.md` y consumo de OpenAI (con `response_format=json_object`).
@@ -76,3 +77,5 @@ Replicar el flujo agentic de n8n (`examples/payloads/Agentic-Pdch.json`) dentro 
 ---
 - El prompt del agente madre vive en `docs/master_agent_prompt.md` y puede editarse sin tocar código.
 - Esta guía debe actualizarse conforme se completen los bloques para mantener alineada la migración.
+
+- `Webhook` ahora acepta payloads crudos de WhatsApp (array `messages`) y los adapta al modelo interno antes de ejecutar el pipeline.

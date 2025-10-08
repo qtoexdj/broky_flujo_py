@@ -67,11 +67,17 @@ def build_inbound_workflow(settings: Settings):
         normalized = state.get("normalized", {}).copy()
         normalized["realtor"] = realtor
         if realtor:
+            if not normalized.get("realtor_id") and realtor.get("id"):
+                normalized["realtor_id"] = realtor.get("id")
             normalized["realtor_bot"] = {
                 "name": realtor.get("bot_name"),
                 "personality": realtor.get("bot_personality"),
                 "tone": realtor.get("bot_tone"),
             }
+            if (not normalized.get("followup_configuration") and realtor.get("followups_prospects")):
+                normalized["followup_configuration"] = realtor.get("followups_prospects")
+            if (not normalized.get("notifications_brokers_configurations") and realtor.get("followups_brokers")):
+                normalized["notifications_brokers_configurations"] = realtor.get("followups_brokers")
             if not normalized.get("id_vector_project") and normalized.get("realtor_id"):
                 slug = str(realtor.get("name") or "").replace(" ", "_")
                 safe_uuid = str(normalized["realtor_id"]).replace("-", "_")
@@ -119,6 +125,12 @@ def build_inbound_workflow(settings: Settings):
             or metadata.get("id_vector_project"),
             "realtor": payload.get("realtor") or metadata.get("realtor"),
         }
+
+        if not normalized.get("session_id"):
+            if normalized.get("realtor_id") and telephone:
+                normalized["session_id"] = f"{telephone}:{normalized['realtor_id']}"
+            elif chat_id:
+                normalized["session_id"] = chat_id
 
         # Si no llega un identificador de vector predefinido, replicamos la
         # convención usada en el flujo original de n8n.
@@ -219,6 +231,13 @@ def build_inbound_workflow(settings: Settings):
         normalized["automatization"] = prospect.get("automatization", True)
         normalized["mentioned_properties"] = prospect.get("mentioned_properties", [])
         normalized["stage"] = prospect.get("stage")
+        normalized["vendor_id"] = prospect.get("vendor_id")
+        normalized["observations"] = prospect.get("observations")
+        normalized["calification_variables"] = prospect.get("calification_variables") or {}
+        normalized["scheduled_at"] = prospect.get("scheduled_at")
+        normalized["created_at"] = prospect.get("created_at")
+        normalized["updated_at"] = prospect.get("updated_at")
+        normalized["source"] = prospect.get("source")
 
         return {
             "normalized": normalized,
@@ -260,25 +279,56 @@ def build_inbound_workflow(settings: Settings):
     def consolidate_official_data(state: InboundState) -> InboundState:
         normalized = state.get("normalized", {})
         realtor = normalized.get("realtor") or {}
+        prospect = state.get("prospect") or {}
+
+        followup_cfg = normalized.get("followup_configuration") or []
+        broker_notifications = (
+            normalized.get("notifications_brokers_configurations") or {}
+        )
+
+        prospect_summary = {
+            "id": normalized.get("prospect_id"),
+            "stage": normalized.get("stage"),
+            "automatization": normalized.get("automatization"),
+            "vendor_id": normalized.get("vendor_id"),
+            "name": normalized.get("name"),
+            "telephone": normalized.get("telephone"),
+            "observations": normalized.get("observations"),
+            "calification_variables": normalized.get("calification_variables") or {},
+            "mentioned_properties": normalized.get("mentioned_properties") or [],
+            "properties_interested": normalized.get("properties_interested", []),
+            "scheduled_at": normalized.get("scheduled_at"),
+            "created_at": normalized.get("created_at"),
+            "updated_at": normalized.get("updated_at"),
+            "source": normalized.get("source"),
+        }
+
         data = {
             "session_id": normalized.get("session_id"),
             "realtor_id": normalized.get("realtor_id"),
             "realtor": realtor,
             "realtor_bot": normalized.get("realtor_bot"),
+            "realtor_followups": {
+                "prospects": realtor.get("followups_prospects"),
+                "brokers": realtor.get("followups_brokers"),
+            },
+            "token_whapi": realtor.get("token_whapi"),
+            "realtor_location": realtor.get("location"),
+            "realtor_description": realtor.get("description"),
             "prospect_id": normalized.get("prospect_id"),
             "telephone": normalized.get("telephone"),
             "name": normalized.get("name"),
             "channel_id": normalized.get("channel_id"),
             "chat_id": normalized.get("chat_id"),
             "message": normalized.get("message"),
-            "followup_configuration": normalized.get("followup_configuration"),
-            "notifications_brokers_configurations": normalized.get(
-                "notifications_brokers_configurations"
-            ),
+            "followup_configuration": followup_cfg,
+            "notifications_brokers_configurations": broker_notifications,
             "id_vector_project": normalized.get("id_vector_project"),
             "properties_interested": normalized.get("properties_interested", []),
             "mentioned_properties": normalized.get("mentioned_properties", []),
             "stage": normalized.get("stage"),
+            "prospect": prospect_summary,
+            "raw_prospect": prospect,
         }
 
         return {

@@ -180,3 +180,28 @@ class ProspectRepository:
 
         data = getattr(response, "data", None) or []
         return data[0] if data else None
+
+    def assign_vendor(self, prospect_id: str, vendor_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Assign or remove a vendor (broker) from the prospect."""
+
+        payload: Dict[str, Any] = {"vendor_id": vendor_id}
+        if vendor_id is None:
+            payload["vendor_id"] = None
+
+        try:
+            response = (
+                self._client.table(self._table)
+                .update(payload)
+                .eq("id", prospect_id)
+                .execute()
+            )
+        except Exception:  # pragma: no cover - log y propagar
+            logger.exception(
+                "Error asignando vendor_id=%s al prospecto %s",
+                vendor_id,
+                prospect_id,
+            )
+            raise
+
+        data = getattr(response, "data", None) or []
+        return data[0] if data else None

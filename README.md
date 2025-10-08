@@ -65,8 +65,19 @@ curl --request POST \
 - `docs/master_agent_prompt.md`: prompt editable del Agente Madre (puedes personalizar tono e instrucciones sin tocar el código).
 - `docs/chats_history_n8n_table.md`: referencia de la tabla de memoria usada por el orquestador.
 - `broky/`: nueva capa híbrida (LangChain) con agentes, herramientas, memoria y runtimes que conectan con LangGraph (incluye subagentes de RAG, proyectos, calificación, agenda y envío de archivos).
+- `broky/processes/assignment.py` y `broky/processes/notifications.py`: procesos posteriores al Agente Madre que asignan brokers disponibles y preparan las notificaciones que deben enviarse tras un hand-off.
+- `app/services/whapi_client.py`: cliente y servicio de entrega que envía la respuesta final (y notificaciones internas) mediante la API de Whapi utilizando `realtors.token_whapi`.
 
 El runtime de LangChain está activo por defecto; no se necesita ninguna bandera adicional para habilitarlo.
+
+Para integraciones tipo WhatsApp, el endpoint `/webhook` acepta payloads con `messages[]`, `event` y `channel_id`, adaptándolos automáticamente al formato interno antes de invocar el pipeline.
+
+### Configuración adicional
+
+- `WHAPI_BASE_URL` (opcional; por defecto `https://gate.whapi.cloud`).
+- `WHAPI_TIMEOUT` (opcional; por defecto `5.0`).
+
+Cada realtor debe tener el campo `token_whapi` configurado en Supabase para que la respuesta se envíe automáticamente a través de la API de Whapi.
 
 ## Pruebas automatizadas
 

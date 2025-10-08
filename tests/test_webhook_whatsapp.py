@@ -1,10 +1,9 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
-from broky.runtime.master import MasterAgentOutput
 
 
-def test_webhook_properties_quilmes(monkeypatch):
+def test_webhook_whatsapp_envelope(monkeypatch):
     from app.api.routes import webhook as webhook_module
 
     def fake_workflow_run(*, payload):
@@ -12,19 +11,21 @@ def test_webhook_properties_quilmes(monkeypatch):
             "payload": payload,
             "normalized": {
                 "message": payload["message"],
-                "session_id": "session-test",
+                "session_id": payload.get("session_id"),
                 "realtor_id": payload.get("realtor_id"),
             },
             "automation_allowed": True,
         }
 
     def fake_master_run(state):
+        from broky.runtime.master import MasterAgentOutput
+
         return MasterAgentOutput(
-            reply="Tenemos varias propiedades disponibles en Quilmes. Te enviaré los detalles enseguida.",
+            reply="Recibimos tu mensaje.",
             intents=["busqueda_informacion"],
-            filters={"filter_rag": True},
+            filters={},
             handoff=False,
-            metadata={"intents": ["busqueda_informacion"]},
+            metadata={},
         )
 
     monkeypatch.setattr(webhook_module._workflow_service, "run", fake_workflow_run)
@@ -33,15 +34,21 @@ def test_webhook_properties_quilmes(monkeypatch):
     monkeypatch.setattr(webhook_module._whapi_delivery, "send_notification", lambda **kwargs: {"ok": True})
 
     client = TestClient(app)
+
     payload = {
-        "from": "usuario_test",
-        "message": "Hola, ¿qué propiedades tienen en Quilmes?",
-        "realtor_id": "de21b61b-d9b5-437a-9785-5252e680b03c",
+        "messages": [
+            {
+                "id": "abc",
+                "from": "56999999999",
+                "from_name": "Matías",
+                "chat_id": "56999999999@s.whatsapp.net",
+                "text": {"body": "Hola"},
+            }
+        ],
+        "event": {"type": "messages", "event": "post"},
+        "channel_id": "ANTMAN-5PA5C",
     }
 
     response = client.post("/webhook", json=payload)
-
     assert response.status_code == 200
-    body = response.json()
-    assert body["user_id"] == payload["from"]
-    assert "Quilmes" in body["reply"]
+    assert response.json()["reply"] == "Recibimos tu mensaje."

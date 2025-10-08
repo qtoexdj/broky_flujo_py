@@ -48,6 +48,7 @@ Prompts activos:
 - **Procesos utilitarios**
   - `followup_prospect` y `followup_broker` — ✅ Lógica portada en `broky/processes/followups.py`. Falta instrumentación, idempotencia extendida y pruebas de regresión integradas.
   - `filter_desinteres` y hand-off humano — ✅ Implementado en `broky/processes/handoff.py`. Pendiente integrar notificaciones externas y métricas de opt-out.
+  - `send_notifications*` / `link_broker_prospect*` — ✅ `broky/processes/assignment.py` asigna brokers activos y `broky/processes/notifications.py` deja en `metadata.notifications` los payloads a disparar. Falta conectar con los canales reales y registrar métricas de entrega.
 
 > Las secciones siguientes describen el diseño funcional original y sirven como checklist de validación. Contrasta cada punto con la implementación actual (`broky/agents`, `broky/tools`, `broky/processes`) y registra los casos cubiertos en pruebas automatizadas.
 
