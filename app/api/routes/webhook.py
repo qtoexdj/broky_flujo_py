@@ -113,10 +113,17 @@ async def handle_webhook(request: Request) -> WebhookResponse:
                 ):
                     logger.info("Justificación generada: %s", justification.strip())
 
+        attachments = None
+        if isinstance(result.metadata, dict):
+            raw_attachments = result.metadata.get("files_links")
+            if isinstance(raw_attachments, list) and raw_attachments:
+                attachments = raw_attachments
+
         delivery_result = _whapi_delivery.send_user_reply(
             reply=reply,
             official_data=official_data,
             messages=split_messages or None,
+            attachments=attachments,
         )
         if not delivery_result.get("ok"):
             logger.info("Mensaje no entregado automáticamente | detalle=%s", delivery_result)

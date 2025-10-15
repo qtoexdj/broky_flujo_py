@@ -65,8 +65,9 @@ class ProjectRepository:
         try:
             response = (
                 self._client.table("projects")
-                .select("id, name_property, name")
+                .select("id, name_property, is_active")
                 .eq("realtor_id", realtor_id)
+                .eq("is_active", True)
                 .execute()
             )
         except Exception:  # pragma: no cover - log and continue

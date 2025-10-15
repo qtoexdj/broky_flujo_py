@@ -78,7 +78,11 @@ class MasterAgentRuntime:
         self._project_interest_agent: Optional[ProjectInterestAgentExecutor]
         try:
             pi_tool = self._tool_registry.get("project_interest_link")
-            self._project_interest_agent = ProjectInterestAgentExecutor(pi_tool)
+            projects_catalog_tool = self._tool_registry.get("projects_list")
+            self._project_interest_agent = ProjectInterestAgentExecutor(
+                pi_tool,
+                projects_tool=projects_catalog_tool,
+            )
         except KeyError:
             self._project_interest_agent = None
 
@@ -122,6 +126,16 @@ class MasterAgentRuntime:
 
         updated_context = self._executor.invoke(context)
         updated_context = self._run_subagents(updated_context)
+
+        if updated_context.metadata.get("subagents"):
+            aggregated = self._merge_additional_metadata(updated_context.metadata.get("subagents"), updated_context.metadata)
+            if aggregated:
+                updated_context.metadata.setdefault("aggregated_context", {}).update(aggregated)
+                updated_context.metadata["aggregated_context"].setdefault(
+                    "preferencias_prospecto",
+                    self._build_preferences_line(updated_context.payload),
+                )
+
         updated_context = self._run_response(updated_context)
         updated_context = self._run_fixing_response(updated_context)
         updated_context = self._run_splitter(updated_context)
@@ -157,11 +171,169 @@ class MasterAgentRuntime:
 
     @staticmethod
     def _resolve_session_id(payload: Dict[str, Any], normalized: Dict[str, Any]) -> str:
-        for key in ("session_id", "chat_id", "user_id"):
-            candidate = normalized.get(key) or payload.get(key)
-            if isinstance(candidate, str) and candidate:
-                return candidate
-        return payload.get("from") or "anonymous"
+        def _clean_phone(value: Any) -> Optional[str]:
+            if not value:
+                return None
+            number = str(value).strip()
+            if not number:
+                return None
+            if "@s.whatsapp.net" in number:
+                number = number.split("@", 1)[0]
+            if number.startswith("+"):
+                number = number[1:]
+            return number or None
+
+        def _build_composite_session() -> Optional[str]:
+            phone_candidates = [
+                normalized.get("telephone"),
+                payload.get("telephone"),
+                payload.get("from"),
+                normalized.get("from"),
+                normalized.get("chat_id"),
+                payload.get("chat_id"),
+            ]
+            telephone = None
+            for raw in phone_candidates:
+                telephone = _clean_phone(raw)
+                if telephone:
+                    break
+
+            realtor_id = normalized.get("realtor_id") or payload.get("realtor_id")
+            if telephone and realtor_id:
+                return f"{telephone}:{realtor_id}"
+            return None
+
+        lookup_priority = [
+            normalized.get("session_id"),
+            payload.get("session_id"),
+            _build_composite_session(),
+            normalized.get("chat_id"),
+            payload.get("chat_id"),
+            normalized.get("user_id"),
+            payload.get("user_id"),
+            payload.get("from"),
+        ]
+
+        realtor_id = normalized.get("realtor_id") or payload.get("realtor_id")
+
+        for candidate in lookup_priority:
+            if not candidate:
+                continue
+            value = str(candidate).strip()
+            if not value:
+                continue
+            if "@s.whatsapp.net" in value and realtor_id:
+                phone = _clean_phone(value)
+                if phone:
+                    return f"{phone}:{realtor_id}"
+                return value.split("@", 1)[0]
+            if ":" not in value and realtor_id:
+                phone = _clean_phone(value)
+                if phone:
+                    return f"{phone}:{realtor_id}"
+            return value
+
+        return "anonymous"
+
+    @staticmethod
+    def _merge_additional_metadata(subagents: Dict[str, Any], metadata: Dict[str, Any]) -> Dict[str, str]:
+        merged: Dict[str, str] = {}
+
+        for key, value in subagents.items():
+            if not value:
+                continue
+            if key == "filter_rag" and isinstance(value, dict):
+                response = value.get("response")
+                if response:
+                    merged.setdefault("informacion_para_responder", f"Contexto relevante: {response}")
+            elif key == "filter_calification" and isinstance(value, dict):
+                calification = value.get("calification")
+                stage = value.get("stage") or metadata.get("stage")
+                details: List[str] = []
+                if isinstance(calification, dict):
+                    forma_pago = calification.get("forma_pago")
+                    fecha = calification.get("fecha_compra_estimativa") or calification.get("fecha_compra")
+                    notas = calification.get("notas")
+                    if forma_pago:
+                        details.append(f"Forma de pago: {forma_pago}")
+                    if fecha:
+                        details.append(f"Fecha estimada de compra: {fecha}")
+                    if notas:
+                        details.append(f"Notas: {notas}")
+                if details:
+                    merged.setdefault("calificacion_para_una_visita", " | ".join(details))
+                if stage:
+                    merged.setdefault("estado_calificacion", f"Etapa de calificación: {stage}")
+            elif key == "filter_schedule" and isinstance(value, dict):
+                visit = value.get("visit") or value
+                if isinstance(visit, dict):
+                    date = visit.get("date") or visit.get("scheduled_at")
+                    if date:
+                        merged.setdefault("estado_del_agendamiento", f"Visita propuesta para {date}")
+            elif key == "filter_files" and isinstance(value, dict):
+                links = value.get("links")
+                if isinstance(links, list) and links:
+                    merged.setdefault("enviado", "Se enviaron los archivos solicitados.")
+            elif key == "filter_contact" and isinstance(value, dict):
+                message = value.get("message")
+                merged.setdefault("vendedor_contactado", message or "Se notificó al vendedor para el contacto humano.")
+            elif key == "filter_desinteres" and isinstance(value, dict):
+                message = value.get("message")
+                merged.setdefault("anotar_desinteres", message or "El usuario solicitó detener la automatización.")
+
+        if metadata.get("followups"):
+            merged.setdefault("estado_del_agendamiento", "Se programaron seguimientos automáticos.")
+
+        return merged
+
+    @staticmethod
+    def _build_preferences_line(payload: Dict[str, Any]) -> Optional[str]:
+        official = payload.get("official_data") if isinstance(payload, dict) else {}
+        if not isinstance(official, dict):
+            return None
+
+        prospect = official.get("prospect") or {}
+        interested = official.get("properties_interested") or []
+
+        names: List[str] = []
+        if isinstance(interested, list):
+            for item in interested:
+                if isinstance(item, dict):
+                    label = (
+                        item.get("name_property")
+                        or item.get("project_name")
+                        or item.get("name")
+                        or item.get("title")
+                    )
+                    if label:
+                        names.append(str(label).strip())
+                elif isinstance(item, str) and item.strip():
+                    names.append(item.strip())
+
+        if names:
+            unique = ", ".join(dict.fromkeys(names))
+            return f"Proyectos de interés confirmados: {unique}"
+
+        mentioned = official.get("mentioned_properties") or prospect.get("mentioned_properties")
+        labels: List[str] = []
+        if isinstance(mentioned, list):
+            for item in mentioned:
+                if isinstance(item, dict):
+                    label = (
+                        item.get("name_property")
+                        or item.get("project_name")
+                        or item.get("name")
+                        or item.get("title")
+                    )
+                    if label:
+                        labels.append(str(label).strip())
+                elif isinstance(item, str) and item.strip():
+                    labels.append(item.strip())
+        if labels:
+            unique = ", ".join(dict.fromkeys(labels))
+            return f"Propiedades mencionadas recientemente: {unique}"
+
+        return None
 
     def _run_subagents(self, context: BrokyContext) -> BrokyContext:
         context.metadata.setdefault("subagents", {})

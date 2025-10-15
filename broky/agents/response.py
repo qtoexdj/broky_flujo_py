@@ -48,7 +48,10 @@ class ResponseAgentExecutor(BrokyAgent):
 
         stage = self._resolve_stage(context, official)
         stage_instruction = self._stage_instruction(stage)
-        additional_info = self._build_additional_info(context, official)
+        aggregated = context.metadata.get("aggregated_context") or {}
+        if isinstance(aggregated, dict):
+            context.metadata.setdefault("contexto_adicional", aggregated)
+        additional_info = self._build_additional_info(context, official, aggregated)
         system_prompt = self._render_prompt(
             bot_name=self._resolve_bot_name(official),
             realtor_name=official.get("realtor", {}).get("name"),
@@ -74,6 +77,7 @@ class ResponseAgentExecutor(BrokyAgent):
             reply = self._fallback_reply(context)
 
         reply = self._apply_special_cases(reply, context)
+        reply = self._append_file_links(reply, context)
         reply = self._trim_reply(reply)
 
         context.metadata["reply"] = reply
@@ -184,12 +188,40 @@ class ResponseAgentExecutor(BrokyAgent):
             lines.append(f"Teléfono prospecto: {prospect['telephone']}")
 
         properties_interested = official.get("properties_interested")
-        if properties_interested:
-            lines.append(f"Proyectos interesados: {properties_interested}")
+        interested_labels: List[str] = []
+        if isinstance(properties_interested, list):
+            for item in properties_interested:
+                if isinstance(item, dict):
+                    label = (
+                        item.get("name_property")
+                        or item.get("project_name")
+                        or item.get("name")
+                        or item.get("title")
+                    )
+                    if label:
+                        interested_labels.append(str(label).strip())
+                elif isinstance(item, str) and item.strip():
+                    interested_labels.append(item.strip())
+        if interested_labels:
+            lines.append("Proyectos interesados: " + ", ".join(dict.fromkeys(interested_labels)))
 
         mentioned = official.get("mentioned_properties")
-        if mentioned:
-            lines.append(f"Propiedades mencionadas: {mentioned}")
+        mentioned_labels: List[str] = []
+        if isinstance(mentioned, list):
+            for item in mentioned:
+                if isinstance(item, dict):
+                    label = (
+                        item.get("name_property")
+                        or item.get("project_name")
+                        or item.get("name")
+                        or item.get("title")
+                    )
+                    if label:
+                        mentioned_labels.append(str(label).strip())
+                elif isinstance(item, str) and item.strip():
+                    mentioned_labels.append(item.strip())
+        if mentioned_labels:
+            lines.append("Propiedades mencionadas: " + ", ".join(dict.fromkeys(mentioned_labels)))
 
         followups = official.get("realtor_followups") or {}
         if followups.get("prospects"):
@@ -209,6 +241,7 @@ class ResponseAgentExecutor(BrokyAgent):
         self,
         context: BrokyContext,
         official: Dict[str, Any],
+        aggregated: Dict[str, str],
     ) -> str:
         fragments: List[str] = []
 
@@ -266,6 +299,12 @@ class ResponseAgentExecutor(BrokyAgent):
         notifications = context.metadata.get("notifications") or []
         if notifications:
             fragments.append("Se prepararon notificaciones adicionales para el equipo interno.")
+
+        if aggregated:
+            for key, value in aggregated.items():
+                if not value:
+                    continue
+                fragments.append(value)
 
         if not fragments:
             fragments.append("Sin información adicional relevante.")
@@ -338,28 +377,33 @@ class ResponseAgentExecutor(BrokyAgent):
         stage_clean = (stage or "").strip().lower()
         mapping = {
             "new-prospect": (
-                "- Descripción: aún no sabes qué propiedad le interesa al usuario.\n"
-                "- Objetivo: identifica primero la propiedad de interés antes de avanzar.\n"
-                "- Nota: si el usuario quiere visitar, pregunta primero qué proyecto le interesa."
+                "- Descripción de la etapa: Aún no sabes qué propiedad le interesa al usuario.\n"
+                "- Objetivo: Tienes que reconocer el o las propiedades de interés del usuario antes de avanzar. No puedes agendar visita en esta etapa aún.\n"
+                "- Nota: Si el usuario te dice que desea visitar, debes preguntarle primero qué propiedad le interesa."
             ),
             "conversation": (
-                "- Descripción: entrega información y resuelve dudas.\n"
-                "- Objetivo: si desea avanzar, indaga de forma sutil en forma de pago y fecha estimada de compra.\n"
-                "- Nota: nunca confundas fechas de visita con fechas de compra."
+                "- *Descripción de la etapa*: Debes proporcionar toda la información y responder a sus dudas, SOLO cuando el usuario quiera avanzar a coordinar una visita, debes incluir preguntas que respondan lo siguiente:\n"
+                "  1. Fecha en la que desea o planea comprar o adquirir la propiedad.\n"
+                "  2. Forma en la que piensa o puede pagar o adquirir la propiedad.\n"
+                "  (Debes ser sutil y nunca insistente al pedir esta información)\n"
+                "  Cuando obtengas alguna de esta información, recibirás en “información adicional” qué información falta del usuario con el fin de guiar tus preguntas.\n"
+                "  Notas importantes:\n"
+                "  Nunca asumas que una fecha mencionada para visitar la propiedad es igual a una fecha de compra. Considera únicamente fechas que se refieran explícitamente a la intención de adquirir o comprar la propiedad."
             ),
             "qualified": (
-                "- Descripción: el prospecto está listo para coordinar visita.\n"
-                "- Objetivo: solicita fecha y hora para VISITAR el proyecto.\n"
-                "- Nota: distingue claramente entre fecha de compra y de visita."
+                "- *Descripción de la etapa*: Cuando el usuario está calificado para visitar presencialmente nuestros proyectos y queremos coordinar una visita.\n"
+                "- *Cómo guiar tu respuesta*: Tienes que consultarle una fecha en la que desea VISITAR y coordinarla.\n"
+                "             - NUNCA debes confundir cuando el usuario se refiere a una fecha en la que desea “COMPRAR”, a una en la que desea “VISITAR”. Son cosas diferentes que no deben ser confundidas. Debes reconocer a qué se refiere el usuario según el contexto de la conversación."
             ),
             "not-qualified": (
-                "- Descripción: el prospecto no cumple condiciones para visitar ahora.\n"
-                "- Objetivo: responde con empatía y explica por qué no puede visitarse todavía.\n"
-                "- Nota: ofrece seguimiento futuro acorde al motivo (forma de pago o fecha lejana)."
+                "- *Descripción de la etapa*: Cuando el usuario no está apto o “calificado” para una visita dado que la fecha de compra es superior a 1 mes o la forma de pago no es aceptable por nuestra empresa.\n"
+                "- *Cómo guiar tu respuesta*: Debes responder a sus dudas, ser empático y explicarle al usuario que no puede visitar en estos momentos por las siguientes razones:\n"
+                "        a) Si es por forma de pago: Explicarle que no aceptamos otras formas de pago.\n"
+                "        b) Si es por fecha de compra mayor a un mes: Explicale que, vamos a contactar al usuario cerca de la fecha de compra para agendar una visita, ya que si visita en estos momentos puede ser que después cuando quiera comprar la parcela ya esté vendida."
             ),
             "scheduled": (
-                "- Descripción: ya existe una visita propuesta pendiente de confirmación humana.\n"
-                "- Objetivo: cierra la conversación indicando que un ejecutivo confirmará la cita."
+                "- *Descripción de la etapa*: Cuando el usuario ya ha sido agendado para una visita presencial con un vendedor, pero aún la visita no está confirmada.\n"
+                "- *Cómo guiar tu respuesta*: Terminar sutilmente la conversación con el usuario, diciéndole que vas a contactar a un ejecutivo para que confirme la disponibilidad de la fecha de visita, el ejecutivo se pondrá en contacto con el usuario a la brevedad posible para confirmar la visita."
             ),
         }
         return mapping.get(stage_clean, "Consulta la información disponible y responde con cortesía.")
@@ -400,6 +444,14 @@ class ResponseAgentExecutor(BrokyAgent):
         if len(reply) <= max_length:
             return reply
         return reply[: max_length - 3].rstrip() + "..."
+
+    def _append_file_links(self, reply: str, context: BrokyContext) -> str:
+        links = context.metadata.get("files_links") or []
+        if not isinstance(links, list) or not links:
+            return reply
+
+        # Los archivos se envían como adjuntos; evitamos duplicar enlaces en el texto.
+        return reply
 
     def _apply_special_cases(self, reply: str, context: BrokyContext) -> str:
         original = reply or ""

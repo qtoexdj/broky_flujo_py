@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+import difflib
+import re
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -56,11 +59,13 @@ class FilesAgentExecutor(BrokyAgent):
         message = self._extract_message(normalized, payload)
         history = context.memory_snapshot.get("messages") if context.memory_snapshot else []
         realtor_id = context.realtor_id or normalized.get("realtor_id") or payload.get("realtor_id")
+        candidates = self._extract_candidate_projects(context)
 
         return {
             "message": message,
             "history": history,
             "realtor_id": realtor_id,
+            "candidates": candidates,
         }
 
     def handle_output(self, context: BrokyContext, result: Dict[str, Any]) -> BrokyContext:
@@ -94,6 +99,8 @@ class FilesAgentExecutor(BrokyAgent):
             structured = self._heuristic_output(message)
 
         file_types = self._coerce_types(structured.get("types") or structured.get("type"))
+        if not file_types:
+            file_types = self._infer_types_from_text(message)
         projects_requested = self._coerce_projects(structured.get("projects"))
         reply = structured.get("reply") or "Estoy recopilando los archivos solicitados."
 
@@ -104,17 +111,29 @@ class FilesAgentExecutor(BrokyAgent):
                 "status": "pending_type",
             }
 
-        if not projects_requested:
-            return {
-                "reply": "¿Para qué proyecto necesitas los archivos? Necesito el nombre exacto.",
-                "links": [],
-                "status": "pending_project",
-            }
-
         catalog = self._projects_tool.invoke({"realtor_id": realtor_id})
-        matches = self._match_projects(projects_requested, catalog)
+        matches = self._match_projects(
+            projects_requested,
+            catalog,
+            message=message,
+        )
+
+        candidates = payload.get("candidates") or []
+        if not matches and candidates:
+            if len(candidates) == 1:
+                candidate = candidates[0]
+                matches[candidate["name"]] = candidate["id"]
+            else:
+                for candidate in candidates:
+                    matches.setdefault(candidate["name"], candidate["id"])
 
         if not matches:
+            if not projects_requested:
+                return {
+                    "reply": "¿Para qué proyecto necesitas los archivos? Necesito el nombre exacto.",
+                    "links": [],
+                    "status": "pending_project",
+                }
             return {
                 "reply": "No reconocí el nombre exacto del proyecto. ¿Podrías confirmarlo?",
                 "links": [],
@@ -134,8 +153,10 @@ class FilesAgentExecutor(BrokyAgent):
                     links.append(
                         {
                             "project": project_name,
+                            "project_id": project_id,
                             "type": file_type,
                             "url": file_entry.get("url", ""),
+                            "name": file_entry.get("name") or "",
                         }
                     )
 
@@ -226,6 +247,33 @@ class FilesAgentExecutor(BrokyAgent):
 
     def _coerce_types(self, raw: Any) -> List[str]:
         types: List[str] = []
+        type_aliases = {
+            "image": "image",
+            "images": "image",
+            "photo": "image",
+            "photos": "image",
+            "picture": "image",
+            "pictures": "image",
+            "imagen": "image",
+            "imágenes": "image",
+            "imagenes": "image",
+            "fotos": "image",
+            "foto": "image",
+            "fotografia": "image",
+            "fotografias": "image",
+            "fotografía": "image",
+            "fotografías": "image",
+            "media": "image",
+            "gallery": "image",
+            "video": "video",
+            "videos": "video",
+            "document": "document",
+            "documento": "document",
+            "documentos": "document",
+            "pdf": "document",
+            "brochure": "document",
+            "kmz": "kmz",
+        }
         if isinstance(raw, str):
             raw = [raw]
         if isinstance(raw, list):
@@ -233,6 +281,7 @@ class FilesAgentExecutor(BrokyAgent):
                 if not isinstance(item, str):
                     continue
                 value = item.strip().lower()
+                value = type_aliases.get(value, value)
                 if value in self.SUPPORTED_TYPES and value not in types:
                     types.append(value)
         return types
@@ -249,33 +298,84 @@ class FilesAgentExecutor(BrokyAgent):
         return projects
 
     @staticmethod
-    def _match_projects(requested: List[str], catalog: List[Dict[str, str]]) -> Dict[str, str]:
+    def _normalize_token(value: str) -> str:
+        normalized = unicodedata.normalize("NFD", value)
+        without_accents = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+        lowered = without_accents.lower()
+        return re.sub(r"[^a-z0-9]+", "", lowered)
+
+    @classmethod
+    def _find_best_match(cls, normalized: str, index: Dict[str, Dict[str, str]]) -> Optional[Dict[str, str]]:
+        if not normalized:
+            return None
+        if normalized in index:
+            return index[normalized]
+        for key, entry in index.items():
+            if not key:
+                continue
+            if normalized in key or key in normalized:
+                return entry
+        closest = difflib.get_close_matches(normalized, list(index.keys()), n=1, cutoff=0.6)
+        if closest:
+            return index[closest[0]]
+        return None
+
+    @classmethod
+    def _match_projects(
+        cls,
+        requested: List[str],
+        catalog: List[Dict[str, str]],
+        *,
+        message: Optional[str] = None,
+    ) -> Dict[str, str]:
         matches: Dict[str, str] = {}
-        index = {
-            (entry.get("name") or "").strip().lower(): str(entry.get("id"))
-            for entry in catalog
-            if entry.get("id") and entry.get("name")
-        }
-        for name in requested:
-            key = name.strip().lower()
-            project_id = index.get(key)
-            if project_id:
-                matches[name] = project_id
+        index: Dict[str, Dict[str, str]] = {}
+        for entry in catalog:
+            project_id = entry.get("id")
+            display_name = entry.get("name_property") or entry.get("name") or ""
+            normalized = cls._normalize_token(display_name)
+            if not project_id or not normalized:
+                continue
+            index.setdefault(normalized, {"name": display_name.strip(), "id": str(project_id)})
+
+        for raw_name in requested or []:
+            normalized = cls._normalize_token(raw_name)
+            match = cls._find_best_match(normalized, index)
+            if match:
+                matches[match["name"]] = match["id"]
+
+        if not matches and message:
+            normalized_message = cls._normalize_token(message)
+            for key, entry in index.items():
+                if key and key in normalized_message:
+                    matches[entry["name"]] = entry["id"]
+
         return matches
 
     @staticmethod
     def _compose_reply(reply: str, links: List[Dict[str, str]]) -> str:
-        grouped: Dict[str, List[str]] = {}
-        for link in links:
-            project = link.get("project") or "Proyecto"
-            grouped.setdefault(project, []).append(link.get("url") or "")
+        reply_line = reply.strip() if isinstance(reply, str) else ""
 
-        summary_lines: List[str] = [reply.strip()]
-        for project, urls in grouped.items():
-            filtered = [url for url in urls if url]
-            if filtered:
-                summary_lines.append(f"{project}: " + ", ".join(filtered))
-        return "\n".join(summary_lines)
+        grouped: Dict[str, set[str]] = {}
+        for entry in links:
+            project = entry.get("project") or "Proyecto"
+            file_type = entry.get("type") or "archivo"
+            grouped.setdefault(project, set()).add(file_type)
+
+        if not grouped:
+            if not reply_line:
+                return "No encontré archivos adicionales en el momento."
+            return reply_line
+
+        if not reply_line or reply_line.lower().startswith("no tengo"):
+            first_project = next(iter(grouped.keys()), "el proyecto seleccionado")
+            reply_line = f"Te envío los archivos disponibles de {first_project}."
+
+        summary_parts = []
+        for project, types in grouped.items():
+            summary_parts.append(f"{project} ({', '.join(sorted(types))})")
+
+        return f"{reply_line}\nArchivos enviados: " + "; ".join(summary_parts)
 
     @staticmethod
     def _heuristic_output(message: str) -> Dict[str, Any]:
@@ -296,3 +396,49 @@ class FilesAgentExecutor(BrokyAgent):
             "projects": [],
             "status": "heuristic",
         }
+
+    @staticmethod
+    def _infer_types_from_text(message: str) -> List[str]:
+        if not message:
+            return []
+        text = message.lower()
+        inferred: List[str] = []
+        if any(keyword in text for keyword in ("foto", "fotos", "imagen", "imagenes", "imágenes", "picture", "photo", "photos")):
+            inferred.append("image")
+        if "video" in text or "videos" in text:
+            inferred.append("video")
+        if "kmz" in text:
+            inferred.append("kmz")
+        if any(keyword in text for keyword in ("documento", "pdf", "brochure", "document")):
+            inferred.append("document")
+        return inferred
+
+    def _extract_candidate_projects(self, context: BrokyContext) -> List[Dict[str, str]]:
+        seen: Dict[str, str] = {}
+
+        official = {}
+        payload = context.payload
+        if isinstance(payload, dict):
+            official = payload.get("official_data") or {}
+
+        sources = [
+            context.metadata.get("projects_added") or [],
+            (official.get("properties_interested") or []),
+            (official.get("prospect") or {}).get("properties_interested") or [],
+        ]
+
+        for container in sources:
+            if not isinstance(container, list):
+                continue
+            for item in container:
+                if not isinstance(item, dict):
+                    continue
+                project_id = item.get("id")
+                name = item.get("name_property") or item.get("name") or item.get("title")
+                if not project_id or not name:
+                    continue
+                project_id = str(project_id)
+                if project_id not in seen:
+                    seen[project_id] = name
+
+        return [{"id": pid, "name": name} for pid, name in seen.items()]

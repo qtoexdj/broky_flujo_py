@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -43,14 +44,27 @@ class ChatHistoryRepository:
             raw_message = row.get("message")
             role = row.get("sender_role")
             content: Optional[str] = None
+            parsed: Optional[Dict[str, Any]] = None
 
             if isinstance(raw_message, dict):
                 msg_type = str(raw_message.get("type") or "").lower()
                 if not role:
                     role = "assistant" if msg_type in {"ai", "assistant"} else "user"
                 content = raw_message.get("content")
+                parsed = raw_message
             elif isinstance(raw_message, str):
-                content = raw_message
+                try:
+                    decoded = json.loads(raw_message)
+                except (json.JSONDecodeError, TypeError):
+                    decoded = None
+                if isinstance(decoded, dict):
+                    msg_type = str(decoded.get("type") or "").lower()
+                    if not role:
+                        role = "assistant" if msg_type in {"ai", "assistant"} else "user"
+                    content = decoded.get("content")
+                    parsed = decoded
+                else:
+                    content = raw_message
 
             if not role:
                 role = "user"
@@ -60,7 +74,7 @@ class ChatHistoryRepository:
                     "id": row.get("id"),
                     "sender_role": role,
                     "message": content,
-                    "raw_message": raw_message,
+                    "raw_message": parsed or raw_message,
                 }
             )
 
@@ -86,7 +100,7 @@ class ChatHistoryRepository:
 
         payload: Dict[str, Any] = {
             "session_id": session_id,
-            "message": message_payload,
+            "message": json.dumps(message_payload, ensure_ascii=False),
         }
 
         try:
