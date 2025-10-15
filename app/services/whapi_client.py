@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
+import base64
 
 import httpx
 from httpx import Response, TimeoutException
@@ -65,9 +66,9 @@ class WhapiClient:
         filename: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"to": to, "media": media_url}
-        if caption:
+        if isinstance(caption, str) and caption.strip():
             payload["caption"] = caption
-        if filename:
+        if isinstance(filename, str) and filename.strip():
             payload["filename"] = filename
         return self._post(
             token=token,
@@ -163,8 +164,9 @@ class WhapiClient:
 class WhapiDeliveryService:
     """Coordina el envío de mensajes al usuario final y notificaciones internas."""
 
-    def __init__(self, client: WhapiClient) -> None:
+    def __init__(self, client: WhapiClient, media_proxy_base: Optional[str] = None) -> None:
         self._client = client
+        self._media_proxy_base = media_proxy_base.rstrip("/") if media_proxy_base else None
 
     def send_user_reply(
         self,
@@ -210,7 +212,12 @@ class WhapiDeliveryService:
         else:
             delay_ms = None
         for message in message_batch:
-            self._client.set_typing(token=token, chat_id=destination, delay=delay_ms)
+            set_typing = getattr(self._client, "set_typing", None)
+            if callable(set_typing):
+                try:
+                    set_typing(token=token, chat_id=destination, delay=delay_ms)
+                except Exception:  # pragma: no cover - logging only
+                    logger.warning("Fallo al enviar presencia typing", exc_info=True)
             response = self._client.send_text(
                 token=token,
                 to=destination,
@@ -299,6 +306,7 @@ class WhapiDeliveryService:
                 continue
             seen_urls.add(url)
 
+            media_url = self._proxy_url(url)
             media_type = self._map_media_type(entry.get("type"))
             caption = None
             filename = None
@@ -306,13 +314,21 @@ class WhapiDeliveryService:
             response = self._client.send_media(
                 token=token,
                 to=to,
-                media_url=url,
+                media_url=media_url,
                 media_type=media_type,
                 caption=caption,
                 filename=filename,
             )
             deliveries.append(response)
         return deliveries
+
+    def _proxy_url(self, url: Optional[str]) -> Optional[str]:
+        if not url or not self._media_proxy_base:
+            return url
+        if url.startswith(self._media_proxy_base):
+            return url
+        token = base64.urlsafe_b64encode(url.encode("utf-8")).decode("ascii").rstrip("=")
+        return f"{self._media_proxy_base}/media/{token}"
 
     @staticmethod
     def _map_media_type(file_type: Optional[str]) -> str:

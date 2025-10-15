@@ -85,14 +85,11 @@ def test_webhook_multi_turn_flow(monkeypatch):
 
     monkeypatch.setattr(webhook_module._workflow_service, "run", fake_workflow_run)
     monkeypatch.setattr(webhook_module, "_master_runtime", runtime)
-    monkeypatch.setattr(
-        webhook_module._whapi_delivery,
-        "send_user_reply",
-        lambda *, reply, official_data, messages=None: sent_replies.append(
-            messages[0] if messages else reply
-        )
-        or {"ok": True},
-    )
+    def fake_send_user_reply(*, reply, official_data, messages=None, attachments=None, **_):
+        sent_replies.append(messages[0] if messages else reply)
+        return {"ok": True}
+
+    monkeypatch.setattr(webhook_module._whapi_delivery, "send_user_reply", fake_send_user_reply)
     monkeypatch.setattr(
         webhook_module._whapi_delivery,
         "send_notification",

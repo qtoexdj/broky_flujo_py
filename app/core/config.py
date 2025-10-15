@@ -70,6 +70,7 @@ class Settings(BaseModel):
         alias="WHAPI_BASE_URL",
     )
     whapi_timeout: float = Field(default=5.0, alias="WHAPI_TIMEOUT")
+    public_base_url: Optional[AnyHttpUrl] = Field(default=None, alias="PUBLIC_BASE_URL")
 
     @property
     def supabase_api_key(self) -> Optional[str]:

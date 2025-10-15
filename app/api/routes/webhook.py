@@ -24,11 +24,13 @@ router = APIRouter(prefix="/webhook", tags=["webhook"])
 _settings = get_settings()
 _workflow_service = InboundWorkflowService(_settings)
 _master_runtime = MasterAgentRuntime(_settings)
+_media_proxy_base = str(_settings.public_base_url) if _settings.public_base_url else None
 _whapi_delivery = WhapiDeliveryService(
     WhapiClient(
         base_url=str(_settings.whapi_base_url) if _settings.whapi_base_url else "https://gate.whapi.cloud",
         timeout=_settings.whapi_timeout,
-    )
+    ),
+    media_proxy_base=_media_proxy_base,
 )
 
 

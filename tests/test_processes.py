@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Any, Dict
 
 from broky.processes.assignment import assign_broker_if_needed
 from broky.processes.notifications import build_notifications
@@ -95,7 +95,7 @@ def test_whapi_delivery_send_user_reply(monkeypatch):
         "token": "secret-token",
         "to": "56912345678",
         "body": "Hola",
-        "extra": {},
+        "extra": {"typing_time": 4},
     }
 
 
@@ -172,10 +172,8 @@ def test_whapi_client_send_text_options():
     recorded: Dict[str, Any] = {}
 
     class _DummyClient:
-        def __init__(self):
-            self.sent = None
-
-        def post(self, url, json, headers):
+        def request(self, method, url, json, headers):
+            recorded["method"] = method
             recorded["url"] = url
             recorded["payload"] = json
             recorded["headers"] = headers
