@@ -1,0 +1,52 @@
+# Archivos de entorno virtual y Python
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Archivos de configuración y credenciales
+.env
+.env.local
+.env.*.local
+
+# Archivos de Git
+.git/
+.gitignore
+.gitattributes
+
+# Archivos de IDE y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Archivos de documentación y ejemplos (opcional, puedes incluirlos si los necesitas)
+docs/
+examples/
+README.md
+
+# Archivos de pruebas (opcional, excluir si no quieres tests en producción)
+tests/
+pytest.ini
+.pytest_cache/
+*.coverage
+htmlcov/
+
+# Archivos de logs
+*.log
+
+# Archivos temporales
+tmp/
+temp/
+*.tmp
