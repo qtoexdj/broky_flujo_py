@@ -32,7 +32,6 @@ build/
 .DS_Store
 
 # Archivos de documentación y ejemplos (opcional, puedes incluirlos si los necesitas)
-docs/
 examples/
 README.md
 
